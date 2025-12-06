@@ -26,10 +26,77 @@ interface InitOptions {
   configFile?: string
   directory?: string
   profile?: string
+  linkClaudeCode?: boolean
 }
 
 function sanitizeDirectoryName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function findHumanLayerRepo(): string | null {
+  try {
+    // Try to find the HumanLayer repo from the hlyr package location
+    // The hlyr package is at: humanlayer/hlyr/
+    // We need to find: humanlayer/
+    const hlyrPath = path.dirname(path.dirname(import.meta.url.replace('file://', '')))
+    const humanlayerPath = path.dirname(hlyrPath)
+
+    // Check if hack/link_to_repo.sh exists in the parent directory
+    const linkScript = path.join(humanlayerPath, 'hack', 'link_to_repo.sh')
+    if (fs.existsSync(linkScript)) {
+      return humanlayerPath
+    }
+
+    // Fallback: try common installation paths
+    const possiblePaths = [
+      path.join(os.homedir(), '.humanlayer'),
+      path.join(os.homedir(), 'src', 'public', 'humanlayer'),
+      '/opt/humanlayer',
+    ]
+
+    for (const possiblePath of possiblePaths) {
+      const linkScript = path.join(possiblePath, 'hack', 'link_to_repo.sh')
+      if (fs.existsSync(linkScript)) {
+        return possiblePath
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+function updateGitIgnore(repoPath: string, entries: string[]): { added: string[]; skipped: string[] } {
+  const gitignorePath = path.join(repoPath, '.gitignore')
+  const added: string[] = []
+  const skipped: string[] = []
+
+  // Read existing .gitignore or create empty
+  let content = ''
+  if (fs.existsSync(gitignorePath)) {
+    content = fs.readFileSync(gitignorePath, 'utf8')
+  }
+
+  const lines = content.split('\n').map(line => line.trim()).filter(Boolean)
+
+  // Add entries that don't already exist
+  for (const entry of entries) {
+    if (!lines.includes(entry)) {
+      lines.push(entry)
+      added.push(entry)
+    } else {
+      skipped.push(entry)
+    }
+  }
+
+  // Write back with newline
+  if (added.length > 0) {
+    const newContent = lines.join('\n') + '\n'
+    fs.writeFileSync(gitignorePath, newContent)
+  }
+
+  return { added, skipped }
 }
 
 function prompt(question: string): Promise<string> {
@@ -691,6 +758,61 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
       console.log(chalk.yellow(`✓ Updated git hooks: ${hookResult.updated.join(', ')}`))
     }
 
+    // Link Claude Code setup if requested
+    if (options.linkClaudeCode) {
+      console.log('')
+      console.log(chalk.blue('🔗 Linking Claude Code setup...'))
+
+      try {
+        // Auto-detect HumanLayer repo
+        const claudeRepoPath = findHumanLayerRepo()
+        if (!claudeRepoPath) {
+          throw new Error(
+            'Could not find HumanLayer repository. Make sure it is installed or accessible.',
+          )
+        }
+
+        // Verify the source repository has the link_to_repo.sh script
+        const linkScript = path.join(claudeRepoPath, 'hack', 'link_to_repo.sh')
+        if (!fs.existsSync(linkScript)) {
+          throw new Error(`link_to_repo.sh not found at ${linkScript}`)
+        }
+
+        // Execute the link script
+        execSync(`bash "${linkScript}" "${currentRepo}"`, {
+          stdio: 'inherit',
+          cwd: claudeRepoPath,
+        })
+
+        // Automatically update .gitignore
+        const gitignoreEntries = [
+          '.claude/agents',
+          '.claude/commands',
+          'hack/spec_metadata.sh',
+        ]
+
+        const gitignoreResult = updateGitIgnore(currentRepo, gitignoreEntries)
+
+        if (gitignoreResult.added.length > 0) {
+          console.log(chalk.green(`✓ Added to .gitignore: ${gitignoreResult.added.join(', ')}`))
+        }
+
+        if (gitignoreResult.skipped.length > 0) {
+          console.log(
+            chalk.yellow(
+              `⚠️  Already in .gitignore: ${gitignoreResult.skipped.join(', ')}`,
+            ),
+          )
+        }
+
+        console.log(chalk.green('✓ Claude Code setup linked'))
+      } catch (error) {
+        console.error(chalk.red(`✗ Failed to link Claude Code setup: ${error.message}`))
+        console.error(chalk.yellow('You can manually link Claude Code setup later:'))
+        console.error(chalk.gray(`  humanlayer thoughts link-claude-code`))
+      }
+    }
+
     console.log(chalk.green('✅ Thoughts setup complete!'))
     console.log('')
     console.log(chalk.blue('=== Summary ==='))
@@ -713,6 +835,11 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
     console.log('Protection enabled:')
     console.log(`  ${chalk.green('✓')} Pre-commit hook: Prevents committing thoughts/`)
     console.log(`  ${chalk.green('✓')} Post-commit hook: Auto-syncs thoughts after commits`)
+
+    if (options.linkClaudeCode) {
+      console.log(`  ${chalk.green('✓')} Claude Code setup linked (symlinks to .claude/ and hack/)`)
+    }
+
     console.log('')
     console.log('Next steps:')
     console.log(`  1. Run ${chalk.cyan('humanlayer thoughts sync')} to create the searchable index`)
@@ -721,6 +848,7 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
     )
     console.log(`  3. Your thoughts will sync automatically when you commit code`)
     console.log(`  4. Run ${chalk.cyan('humanlayer thoughts status')} to check sync status`)
+
   } catch (error) {
     console.error(chalk.red(`Error during thoughts init: ${error}`))
     process.exit(1)

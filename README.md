@@ -93,6 +93,46 @@ npx humanlayer join-waitlist --email ...
 
 ---
 
+## Developer Tools
+
+### Linking Claude Code Setup to Other Repositories
+
+The HumanLayer repository contains Claude Code configuration (agents, commands, and helpers) that you can share across projects. Use the `link_to_repo.sh` script to automatically symlink these tools into another repository.
+
+#### Basic Usage
+
+```bash
+# Link minimal setup (Claude Code agents, commands, and spec_metadata.sh)
+./hack/link_to_repo.sh /path/to/other-repo
+
+# Link everything including worktree and Linear scripts
+./hack/link_to_repo.sh /path/to/other-repo --full
+```
+
+#### Options
+
+- `--minimal` (default): Links only core Claude Code configuration (`.claude/` and `spec_metadata.sh`)
+- `--full`: Includes additional scripts for worktree management and Linear integration
+- `--help`: Show help message
+
+#### Integration with `humanlayer thoughts init`
+
+You can automatically set up Claude Code linking when initializing the thoughts system:
+
+```bash
+humanlayer thoughts init --link-claude-code
+```
+
+This will:
+1. Initialize the thoughts system for your repository
+2. Auto-detect and link Claude Code setup from the HumanLayer repository
+3. Automatically add symlinks to your `.gitignore`
+4. Set up all necessary git hooks
+
+The symlinks will automatically update whenever the HumanLayer repository is modified, keeping your tooling in sync.
+
+---
+
 ## Legacy Documentation
 
 Looking for the HumanLayer SDK documentation? See [humanlayer.md](./humanlayer.md)

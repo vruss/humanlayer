@@ -19,6 +19,7 @@ export function thoughtsCommand(program: Command): void {
     .option('--config-file <path>', 'Path to config file')
     .option('--directory <name>', 'Specify the repository directory name (skips interactive prompt)')
     .option('--profile <name>', 'Use a specific thoughts profile')
+    .option('--link-claude-code', 'Link Claude Code setup from HumanLayer repository')
     .action(thoughtsInitCommand)
 
   thoughts
