@@ -1,234 +1,268 @@
 import path from 'path'
 import os from 'os'
 
-export type ModelType = 'haiku' | 'sonnet' | 'opus'
-
 // Use platform-specific line ending
 const EOL = os.EOL
 
 /**
- * Transform short model names to full Anthropic model names
+ * Frontmatter parsed from YAML
  */
-export function transformModelName(model: string | undefined): string {
-  if (!model) return 'anthropic/claude-opus-4'
+interface Frontmatter {
+	description?: string
+	agent?: string
+	subtask?: string
+	tools?: string
+	mode?: string
+	[key: string]: any // Allow additional properties
+}
 
-  const modelMap: Record<string, string> = {
-    opus: 'anthropic/claude-opus-4',
-    sonnet: 'anthropic/claude-sonnet-4-5',
-    haiku: 'anthropic/claude-haiku-4-5',
-  }
+/**
+ * Result of parsing frontmatter from markdown content
+ */
+interface ParsedContent {
+	frontmatter: Frontmatter
+	body: string
+}
 
-  // Return mapped value or pass through if already a full name
-  return modelMap[model] || model
+/**
+ * Parse YAML frontmatter from markdown content
+ * Returns parsed frontmatter and body content
+ */
+function parseFrontmatter(content: string): ParsedContent | null {
+	// Handle both \n and \r\n line endings
+	const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
+
+	if (!frontmatterMatch) {
+		return null
+	}
+
+	const [, frontmatterText, body] = frontmatterMatch
+	const lines = frontmatterText.split(/\r?\n/)
+	const frontmatter: Frontmatter = {}
+
+	// Parse YAML frontmatter (simple key: value pairs)
+	for (const line of lines) {
+		const match = line.match(/^(\w+):\s*(.*)$/)
+		if (match) {
+			frontmatter[match[1]] = match[2]
+		}
+	}
+
+	return { frontmatter, body }
 }
 
 /**
  * Parse Claude tools string (comma-separated) to OpenCode tools object
  */
 export function parseClaudeTools(toolsString: string): Record<string, boolean> {
-  const tools: Record<string, boolean> = {}
+	const tools: Record<string, boolean> = {}
 
-  const toolMap: Record<string, string> = {
-    Grep: 'grep',
-    Glob: 'glob',
-    LS: 'list',
-    Read: 'read',
-    Write: 'write',
-    Edit: 'edit',
-    Bash: 'bash',
-    Task: 'task',
-    TodoWrite: 'todowrite',
-    TodoRead: 'todoread',
-  }
+	const toolMap: Record<string, string> = {
+		Grep: 'grep',
+		Glob: 'glob',
+		LS: 'list',
+		Read: 'read',
+		Write: 'write',
+		Edit: 'edit',
+		Bash: 'bash',
+		Task: 'task',
+		TodoWrite: 'todowrite',
+		TodoRead: 'todoread',
+	}
 
-  const parts = toolsString.split(',').map(s => s.trim())
+	const parts = toolsString.split(',').map((s) => s.trim())
 
-  for (const part of parts) {
-    const normalizedName = toolMap[part] || part.toLowerCase()
-    tools[normalizedName] = true
-  }
+	for (const part of parts) {
+		const normalizedName = toolMap[part] || part.toLowerCase()
+		tools[normalizedName] = true
+	}
 
-  return tools
+	return tools
+}
+
+/**
+ * Check if content needs cross-platform guidance
+ * Returns true if the content references paths/directories or uses filesystem operations
+ */
+export function needsPlatformGuidance(body: string): boolean {
+	// Check if body references paths/directories
+	const pathPatterns = [
+		/thoughts\//i,
+		/codebase/i,
+		/directory|directories/i,
+		/file path/i,
+		/@codebase-locator/i,
+		/@thoughts-locator/i,
+		/@codebase-analyzer/i,
+		/@codebase-pattern-finder/i,
+	]
+
+	return pathPatterns.some((pattern) => pattern.test(body))
+}
+
+/**
+ * Generate concise cross-platform compatibility guidance
+ */
+export function generatePlatformGuidance(): string {
+	return `## Platform Compatibility${EOL}${EOL}**IMPORTANT**: The \`grep\`, \`glob\`, and \`list\` tools automatically handle path separators for your platform (Windows, macOS, Linux).${EOL}${EOL}- Always use forward slashes (\`/\`) in search patterns and file paths - they work cross-platform${EOL}- Tools normalize paths to your platform's native format automatically${EOL}- Never manually construct platform-specific paths${EOL}- Let the tools handle cross-platform operation${EOL}${EOL}`
 }
 
 /**
  * Transform command file from Claude format to OpenCode format
  */
 export function transformCommandFile(content: string): string {
-  // Parse frontmatter and body
-  // Handle both \n and \r\n line endings
-  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
+	// Parse frontmatter and body
+	const parsed = parseFrontmatter(content)
 
-  if (!frontmatterMatch) {
-    // No frontmatter - treat entire content as template
-    return `---${EOL}description: Custom command${EOL}---${EOL}${EOL}${content}`
-  }
+	if (!parsed) {
+		// No frontmatter - treat entire content as template
+		return `---${EOL}description: Custom command${EOL}---${EOL}${EOL}${content}`
+	}
 
-  const [, frontmatter, body] = frontmatterMatch
-  const lines = frontmatter.split(/\r?\n/)
-  const fm: Record<string, any> = {}
+	const { frontmatter: fm, body } = parsed
 
-  // Parse YAML frontmatter
-  for (const line of lines) {
-    const match = line.match(/^(\w+):\s*(.*)$/)
-    if (match) {
-      fm[match[1]] = match[2]
-    }
-  }
+	// Transform body content
+	let transformedContent = body.trim()
 
-  // Transform body content
-  let transformedContent = body.trim()
+	// Transform: SlashCommand() calls -> just the command
+	// Example: "use SlashCommand() to call /ralph_research" -> "use /ralph_research"
+	transformedContent = transformedContent.replace(/use SlashCommand\(\) to call (\/[\w_-]+)/g, 'use $1')
 
-  // Transform: SlashCommand() calls -> just the command
-  // Example: "use SlashCommand() to call /ralph_research" -> "use /ralph_research"
-  transformedContent = transformedContent.replace(
-    /use SlashCommand\(\) to call (\/[\w_-]+)/g,
-    'use $1',
-  )
+	// Transform: npx humanlayer launch commands -> OpenCode equivalent
+	// These commands don't make sense in OpenCode (commands run in same session)
+	transformedContent = transformedContent.replace(
+		/launch a new session with `npx humanlayer launch[^`]+`/g,
+		'(Note: In OpenCode, commands run in the same session - no need to launch separate sessions)',
+	)
 
-  // Transform: npx humanlayer launch commands -> OpenCode equivalent
-  // These commands don't make sense in OpenCode (commands run in same session)
-  transformedContent = transformedContent.replace(
-    /launch a new session with `npx humanlayer launch[^`]+`/g,
-    '(Note: In OpenCode, commands run in the same session - no need to launch separate sessions)',
-  )
+	transformedContent = transformedContent.replace(/humanlayer launch[^\n]+/g, (match) => {
+		// Keep on separate line with note
+		return '(OpenCode note: This workflow is specific to Claude Code - adapt as needed for OpenCode)'
+	})
 
-  transformedContent = transformedContent.replace(/humanlayer launch[^\n]+/g, match => {
-    // Keep on separate line with note
-    return '(OpenCode note: This workflow is specific to Claude Code - adapt as needed for OpenCode)'
-  })
+	// Transform: Task() pseudo-code examples -> @agent syntax
+	transformedContent = transformedContent.replace(/Task\("([^"]+)",\s*([^)]+)\)/g, (match, desc) => {
+		return `@subagent with prompt: "${desc}"`
+	})
 
-  // Transform: Task() pseudo-code examples -> @agent syntax
-  transformedContent = transformedContent.replace(/Task\("([^"]+)",\s*([^)]+)\)/g, (match, desc) => {
-    return `@subagent with prompt: "${desc}"`
-  })
+	// Build new frontmatter
+	let newFrontmatter = `---${EOL}`
+	newFrontmatter += `description: ${fm.description || 'Custom command'}${EOL}`
+	if (fm.agent) {
+		newFrontmatter += `agent: ${fm.agent}${EOL}`
+	}
+	if (fm.subtask !== undefined) {
+		newFrontmatter += `subtask: ${fm.subtask}${EOL}`
+	}
+	newFrontmatter += `---${EOL}${EOL}`
 
-  // Build new frontmatter
-  let newFrontmatter = `---${EOL}`
-  newFrontmatter += `description: ${fm.description || 'Custom command'}${EOL}`
-  if (fm.model) {
-    newFrontmatter += `model: ${transformModelName(fm.model)}${EOL}`
-  }
-  if (fm.agent) {
-    newFrontmatter += `agent: ${fm.agent}${EOL}`
-  }
-  if (fm.subtask !== undefined) {
-    newFrontmatter += `subtask: ${fm.subtask}${EOL}`
-  }
-  newFrontmatter += `---${EOL}${EOL}`
+	// Inject platform guidance if needed
+	if (needsPlatformGuidance(transformedContent)) {
+		return newFrontmatter + generatePlatformGuidance() + transformedContent
+	}
 
-  return newFrontmatter + transformedContent
+	return newFrontmatter + transformedContent
 }
 
 /**
  * Transform agent file from Claude format to OpenCode format
  */
 export function transformAgentFile(content: string): string {
-  // Handle both \n and \r\n line endings
-  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
+	// Parse frontmatter and body
+	const parsed = parseFrontmatter(content)
 
-  if (!frontmatterMatch) {
-    return content // Return as-is if no frontmatter
-  }
+	if (!parsed) {
+		return content // Return as-is if no frontmatter
+	}
 
-  const [, frontmatter, body] = frontmatterMatch
-  const lines = frontmatter.split(/\r?\n/)
-  const fm: Record<string, any> = {}
+	const { frontmatter: fm, body } = parsed
 
-  // Parse YAML frontmatter
-  for (const line of lines) {
-    const match = line.match(/^(\w+):\s*(.*)$/)
-    if (match) {
-      fm[match[1]] = match[2]
-    }
-  }
+	// Build OpenCode frontmatter
+	let newFrontmatter = `---${EOL}`
 
-  // Build OpenCode frontmatter
-  let newFrontmatter = `---${EOL}`
+	// description (required)
+	newFrontmatter += `description: ${fm.description || 'Specialized agent'}${EOL}`
 
-  // description (required)
-  newFrontmatter += `description: ${fm.description || 'Specialized agent'}${EOL}`
+	// mode (all agents in .claude are subagents)
+	newFrontmatter += `mode: subagent${EOL}`
 
-  // mode (all agents in .claude are subagents)
-  newFrontmatter += `mode: subagent${EOL}`
+	// tools (transform from string to object)
+	if (fm.tools) {
+		const toolsObj = parseClaudeTools(fm.tools)
+		newFrontmatter += `tools:${EOL}`
+		for (const [tool, enabled] of Object.entries(toolsObj)) {
+			newFrontmatter += `  ${tool}: ${enabled}${EOL}`
+		}
+	}
 
-  // model (transform short names)
-  if (fm.model) {
-    newFrontmatter += `model: ${transformModelName(fm.model)}${EOL}`
-  }
+	// Note: We remove 'name' field - filename becomes the agent name in OpenCode
 
-  // tools (transform from string to object)
-  if (fm.tools) {
-    const toolsObj = parseClaudeTools(fm.tools)
-    newFrontmatter += `tools:${EOL}`
-    for (const [tool, enabled] of Object.entries(toolsObj)) {
-      newFrontmatter += `  ${tool}: ${enabled}${EOL}`
-    }
-  }
+	newFrontmatter += `---${EOL}${EOL}`
 
-  // Note: We remove 'name' field - filename becomes the agent name in OpenCode
+	const bodyContent = body.trim()
 
-  newFrontmatter += `---${EOL}${EOL}`
+	// Inject platform guidance if needed
+	// Agents with filesystem tools (grep, glob, list) get guidance
+	const hasFilesystemTools =
+		fm.tools && ['grep', 'glob', 'list'].some((tool) => fm.tools?.toLowerCase().includes(tool.toLowerCase()))
 
-  return newFrontmatter + body.trim()
+	if (hasFilesystemTools || needsPlatformGuidance(bodyContent)) {
+		return newFrontmatter + generatePlatformGuidance() + bodyContent
+	}
+
+	return newFrontmatter + bodyContent
 }
 
 /**
  * Transform Claude settings.json to OpenCode opencode.json
  */
-export function transformSettings(
-  settings: any,
-  options: { model?: ModelType },
-): Record<string, any> {
-  const config: Record<string, any> = {
-    $schema: 'https://opencode.ai/config.json',
-  }
+export function transformSettings(settings: any): Record<string, any> {
+	const config: Record<string, any> = {
+		$schema: 'https://opencode.ai/config.json',
+	}
 
-  // Transform model
-  config.model = transformModelName(options.model || settings.model || 'opus')
+	// Transform permissions from Claude format to OpenCode format
+	if (settings.permissions?.allow) {
+		config.permission = {}
 
-  // Transform permissions from Claude format to OpenCode format
-  if (settings.permissions?.allow) {
-    config.permission = {}
+		// Parse Claude permissions
+		const bashPermissions: Record<string, string> = {}
 
-    // Parse Claude permissions
-    const bashPermissions: Record<string, string> = {}
+		for (const perm of settings.permissions.allow) {
+			// Example: "Bash(./hack/spec_metadata.sh)" -> bash permission
+			const bashMatch = perm.match(/^Bash\((.+)\)$/)
+			if (bashMatch) {
+				bashPermissions[bashMatch[1]] = 'allow'
+			}
+		}
 
-    for (const perm of settings.permissions.allow) {
-      // Example: "Bash(./hack/spec_metadata.sh)" -> bash permission
-      const bashMatch = perm.match(/^Bash\((.+)\)$/)
-      if (bashMatch) {
-        bashPermissions[bashMatch[1]] = 'allow'
-      }
-    }
+		if (Object.keys(bashPermissions).length > 0) {
+			config.permission.bash = {
+				...bashPermissions,
+				'*': 'ask', // Default to asking for other commands
+			}
+		}
+	}
 
-    if (Object.keys(bashPermissions).length > 0) {
-      config.permission.bash = {
-        ...bashPermissions,
-        '*': 'ask', // Default to asking for other commands
-      }
-    }
-  }
+	// Add instructions reference (for AGENTS.md if created)
+	config.instructions = ['AGENTS.md']
 
-  // Add instructions reference (for AGENTS.md if created)
-  config.instructions = ['AGENTS.md']
+	// Drop Claude-specific settings that don't apply to OpenCode:
+	// - enableAllProjectMcpServers (OpenCode handles MCP differently)
+	// - env.MAX_THINKING_TOKENS (thinking mode is Claude-specific)
+	// - env.CLAUDE_BASH_MAINTAIN_WORKING_DIR (Claude-specific)
+	// - alwaysThinkingEnabled (Claude-specific)
 
-  // Drop Claude-specific settings that don't apply to OpenCode:
-  // - enableAllProjectMcpServers (OpenCode handles MCP differently)
-  // - env.MAX_THINKING_TOKENS (thinking mode is Claude-specific)
-  // - env.CLAUDE_BASH_MAINTAIN_WORKING_DIR (Claude-specific)
-  // - alwaysThinkingEnabled (Claude-specific)
-
-  return config
+	return config
 }
 
 /**
  * Generate AGENTS.md template for a project
  */
 export function generateAgentsMd(projectPath: string): string {
-  const projectName = path.basename(projectPath)
+	const projectName = path.basename(projectPath)
 
-  return `# ${projectName} - OpenCode Configuration
+	return `# ${projectName} - OpenCode Configuration
 
 This file contains custom instructions for OpenCode when working in this project.
 
