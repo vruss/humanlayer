@@ -8,7 +8,7 @@ import { execSync } from 'child_process'
  */
 
 export function isWindows(): boolean {
-	return process.platform === 'win32'
+  return process.platform === 'win32'
 }
 
 /**
@@ -17,39 +17,39 @@ export function isWindows(): boolean {
  * On Windows: uses Node.js fs operations to make files writable
  */
 export function removeReadOnly(dirPath: string): void {
-	if (!isWindows()) {
-		// Unix: use chmod
-		try {
-			execSync(`chmod -R 755 "${dirPath}"`, { stdio: 'pipe' })
-		} catch (error) {
-			// Ignore chmod errors - best effort
-		}
-	} else {
-		// Windows: use Node.js fs operations to remove read-only
-		const removeReadOnlyRecursive = (dir: string) => {
-			if (!fs.existsSync(dir)) return
+  if (!isWindows()) {
+    // Unix: use chmod
+    try {
+      execSync(`chmod -R 755 "${dirPath}"`, { stdio: 'pipe' })
+    } catch (error) {
+      // Ignore chmod errors - best effort
+    }
+  } else {
+    // Windows: use Node.js fs operations to remove read-only
+    const removeReadOnlyRecursive = (dir: string) => {
+      if (!fs.existsSync(dir)) return
 
-			const entries = fs.readdirSync(dir, { withFileTypes: true })
-			for (const entry of entries) {
-				const fullPath = path.join(dir, entry.name)
-				try {
-					// Make writable (0o666 = rw-rw-rw-)
-					fs.chmodSync(fullPath, 0o666)
-					if (entry.isDirectory()) {
-						removeReadOnlyRecursive(fullPath)
-					}
-				} catch {
-					// Ignore errors, file might already be writable or inaccessible
-				}
-			}
-		}
+      const entries = fs.readdirSync(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name)
+        try {
+          // Make writable (0o666 = rw-rw-rw-)
+          fs.chmodSync(fullPath, 0o666)
+          if (entry.isDirectory()) {
+            removeReadOnlyRecursive(fullPath)
+          }
+        } catch {
+          // Ignore errors, file might already be writable or inaccessible
+        }
+      }
+    }
 
-		try {
-			removeReadOnlyRecursive(dirPath)
-		} catch {
-			// Ignore errors - best effort
-		}
-	}
+    try {
+      removeReadOnlyRecursive(dirPath)
+    } catch {
+      // Ignore errors - best effort
+    }
+  }
 }
 
 /**
@@ -58,12 +58,12 @@ export function removeReadOnly(dirPath: string): void {
  * On Windows: no-op (not needed)
  */
 export function makeFileExecutable(filePath: string): void {
-	if (!isWindows()) {
-		try {
-			fs.chmodSync(filePath, '755')
-		} catch {
-			// Ignore errors
-		}
-	}
-	// Windows: no-op, executability is determined by file extension
+  if (!isWindows()) {
+    try {
+      fs.chmodSync(filePath, '755')
+    } catch {
+      // Ignore errors
+    }
+  }
+  // Windows: no-op, executability is determined by file extension
 }

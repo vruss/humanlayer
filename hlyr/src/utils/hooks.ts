@@ -14,7 +14,7 @@ import path from 'path'
  * @returns Hook script content
  */
 export function generatePreCommitHook(version: string): string {
-	return `#!/usr/bin/env node
+  return `#!/usr/bin/env node
 // HumanLayer thoughts protection - prevent committing thoughts directory
 // Version: ${version}
 
@@ -62,7 +62,7 @@ if (fs.existsSync(oldHook)) {
  * @returns Hook script content
  */
 export function generatePostCommitHook(version: string): string {
-	return `#!/usr/bin/env node
+  return `#!/usr/bin/env node
 // HumanLayer thoughts auto-sync
 // Version: ${version}
 
@@ -105,14 +105,14 @@ if (fs.existsSync(oldHook)) {
  * Check if a hook needs updating based on version number
  */
 function hookNeedsVersionUpdate(hookPath: string, newContent: string): boolean {
-	if (!fs.existsSync(hookPath)) return true
+  if (!fs.existsSync(hookPath)) return true
 
-	const existing = fs.readFileSync(hookPath, 'utf8')
-	const existingVersion = existing.match(/Version: (\d+)/)?.[1]
-	const newVersion = newContent.match(/Version: (\d+)/)?.[1]
+  const existing = fs.readFileSync(hookPath, 'utf8')
+  const existingVersion = existing.match(/Version: (\d+)/)?.[1]
+  const newVersion = newContent.match(/Version: (\d+)/)?.[1]
 
-	if (!existingVersion || !newVersion) return true
-	return parseInt(existingVersion) < parseInt(newVersion)
+  if (!existingVersion || !newVersion) return true
+  return parseInt(existingVersion) < parseInt(newVersion)
 }
 
 /**
@@ -123,43 +123,47 @@ function hookNeedsVersionUpdate(hookPath: string, newContent: string): boolean {
  * @param content - Hook script content
  * @returns Object indicating if hook was updated
  */
-export function installGitHook(hooksDir: string, hookName: string, content: string): { updated: boolean } {
-	const hookPath = path.join(hooksDir, hookName)
-	const oldHookPath = `${hookPath}.old`
+export function installGitHook(
+  hooksDir: string,
+  hookName: string,
+  content: string,
+): { updated: boolean } {
+  const hookPath = path.join(hooksDir, hookName)
+  const oldHookPath = `${hookPath}.old`
 
-	// Check if hook needs updating (version check)
-	const needsUpdate =
-		!fs.existsSync(hookPath) ||
-		!fs.readFileSync(hookPath, 'utf8').includes('HumanLayer thoughts') ||
-		hookNeedsVersionUpdate(hookPath, content)
+  // Check if hook needs updating (version check)
+  const needsUpdate =
+    !fs.existsSync(hookPath) ||
+    !fs.readFileSync(hookPath, 'utf8').includes('HumanLayer thoughts') ||
+    hookNeedsVersionUpdate(hookPath, content)
 
-	if (!needsUpdate) {
-		return { updated: false }
-	}
+  if (!needsUpdate) {
+    return { updated: false }
+  }
 
-	// Backup existing non-HumanLayer hook
-	if (fs.existsSync(hookPath)) {
-		const existing = fs.readFileSync(hookPath, 'utf8')
-		if (!existing.includes('HumanLayer thoughts')) {
-			// Not our hook, back it up
-			fs.renameSync(hookPath, oldHookPath)
-		} else {
-			// Old version of our hook, just replace it
-			fs.unlinkSync(hookPath)
-		}
-	}
+  // Backup existing non-HumanLayer hook
+  if (fs.existsSync(hookPath)) {
+    const existing = fs.readFileSync(hookPath, 'utf8')
+    if (!existing.includes('HumanLayer thoughts')) {
+      // Not our hook, back it up
+      fs.renameSync(hookPath, oldHookPath)
+    } else {
+      // Old version of our hook, just replace it
+      fs.unlinkSync(hookPath)
+    }
+  }
 
-	// Write new hook
-	fs.writeFileSync(hookPath, content)
+  // Write new hook
+  fs.writeFileSync(hookPath, content)
 
-	// Make executable on Unix (Windows doesn't need this)
-	if (process.platform !== 'win32') {
-		try {
-			fs.chmodSync(hookPath, '755')
-		} catch {
-			// Ignore chmod errors
-		}
-	}
+  // Make executable on Unix (Windows doesn't need this)
+  if (process.platform !== 'win32') {
+    try {
+      fs.chmodSync(hookPath, '755')
+    } catch {
+      // Ignore chmod errors
+    }
+  }
 
-	return { updated: true }
+  return { updated: true }
 }
