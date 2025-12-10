@@ -312,6 +312,33 @@ humanlayer claude init --all
 
 Without `--all`, the command requires an interactive terminal and will exit with an error in non-TTY environments.
 
+## Windows Support
+
+The `thoughts` system works on Windows with the following platform-specific behavior:
+
+### Directory Links
+
+- **Unix/macOS/Linux**: Uses symbolic links
+- **Windows**: Uses directory junctions (works without administrator privileges)
+
+Both approaches provide the same functionality - accessing thoughts as if they're part of your code repository.
+
+### Recommended: WSL for Windows Users
+
+For the best experience on Windows, we recommend using **Windows Subsystem for Linux (WSL)**:
+
+- Full Unix compatibility
+- Native symlink support
+- Seamless integration with Windows filesystem
+
+**Install WSL**: https://aka.ms/wsl
+
+### Requirements for Native Windows
+
+- **Hard Links**: Thoughts repository must be on the same drive as your code (e.g., both on C:)
+- **Git Hooks**: Use Node.js-based hooks that work in cmd, PowerShell, Git Bash, and WSL
+- **No Admin Required**: Directory junctions work without elevated privileges
+
 ## Use Cases
 
 - **CI/CD Pipelines**: Get human approval before deploying

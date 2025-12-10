@@ -260,6 +260,24 @@ humanlayer thoughts init
 
 The thoughts directory is protected by a pre-commit hook that prevents accidental commits to your code repository. This ensures clean CI/CD pipelines while keeping thoughts accessible for searching and development.
 
+## Platform Compatibility
+
+### Windows
+
+The thoughts system fully supports Windows:
+
+✅ **Directory Junctions**: No administrator privileges required  
+✅ **Git Hooks**: Node.js-based, work in all Windows shells (cmd, PowerShell, Git Bash)  
+✅ **Cross-Platform**: Same commands and workflow as Unix
+
+**Important**: Your thoughts repository and code must be on the same drive (e.g., both on C:) for hard links to work.
+
+**Best Experience**: Use WSL (Windows Subsystem for Linux) for full Unix compatibility: https://aka.ms/wsl
+
+### Unix/macOS/Linux
+
+Uses native symbolic links and all features work as expected.
+
 ## Privacy & Security
 
 - Thoughts are stored separately from your code
