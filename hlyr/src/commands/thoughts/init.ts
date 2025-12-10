@@ -20,6 +20,9 @@ import {
   validateProfile,
   resolveProfileForRepo,
 } from '../../thoughtsConfig.js'
+import { isWindows, removeReadOnly } from '../../utils/platform.js'
+import { createDirectoryLink, showLinkInfo } from '../../utils/symlink.js'
+import { generatePreCommitHook, generatePostCommitHook, installGitHook } from '../../utils/hooks.js'
 
 interface InitOptions {
   force?: boolean
@@ -78,7 +81,10 @@ function updateGitIgnore(repoPath: string, entries: string[]): { added: string[]
     content = fs.readFileSync(gitignorePath, 'utf8')
   }
 
-  const lines = content.split('\n').map(line => line.trim()).filter(Boolean)
+  const lines = content
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
 
   // Add entries that don't already exist
   for (const entry of entries) {
@@ -254,6 +260,7 @@ These files will be automatically synchronized with your thoughts repository whe
 
 function setupGitHooks(repoPath: string): { updated: string[] } {
   const updated: string[] = []
+
   // Use git rev-parse to find the common git directory for hooks (handles worktrees)
   // In worktrees, hooks are stored in the common git directory, not the worktree-specific one
   let gitCommonDir: string
@@ -279,104 +286,17 @@ function setupGitHooks(repoPath: string): { updated: string[] } {
     fs.mkdirSync(hooksDir, { recursive: true })
   }
 
-  // Hook version for update detection
-  const HOOK_VERSION = '3' // Increment when hooks need updating - v3 fixes recursive backup issue
+  const HOOK_VERSION = '4' // Increment when hooks need updating - v4 uses Node.js for cross-platform
 
-  // Pre-commit hook
-  const preCommitPath = path.join(hooksDir, 'pre-commit')
-  const preCommitContent = `#!/bin/bash
-# HumanLayer thoughts protection - prevent committing thoughts directory
-# Version: ${HOOK_VERSION}
-
-if git diff --cached --name-only | grep -q "^thoughts/"; then
-    echo "❌ Cannot commit thoughts/ to code repository"
-    echo "The thoughts directory should only exist in your separate thoughts repository."
-    git reset HEAD -- thoughts/
-    exit 1
-fi
-
-# Call any existing pre-commit hook
-if [ -f "${preCommitPath}.old" ]; then
-    "${preCommitPath}.old" "$@"
-fi
-`
-
-  // Post-commit hook
-  const postCommitPath = path.join(hooksDir, 'post-commit')
-  const postCommitContent = `#!/bin/bash
-# HumanLayer thoughts auto-sync
-# Version: ${HOOK_VERSION}
-
-# Check if we're in a worktree
-if [ -f .git ]; then
-    # Skip auto-sync in worktrees to avoid repository boundary confusion
-    # See: https://linear.app/humanlayer/issue/ENG-1455
-    exit 0
-fi
-
-# Get the commit message
-COMMIT_MSG=$(git log -1 --pretty=%B)
-
-# Auto-sync thoughts after each commit (only in non-worktree repos)
-humanlayer thoughts sync --message "Auto-sync with commit: $COMMIT_MSG" >/dev/null 2>&1 &
-
-# Call any existing post-commit hook
-if [ -f "${postCommitPath}.old" ]; then
-    "${postCommitPath}.old" "$@"
-fi
-`
-
-  // Helper to check if hook needs updating
-  const hookNeedsUpdate = (hookPath: string): boolean => {
-    if (!fs.existsSync(hookPath)) return true
-    const content = fs.readFileSync(hookPath, 'utf8')
-    if (!content.includes('HumanLayer thoughts')) return false // Not our hook
-
-    // Check version
-    const versionMatch = content.match(/# Version: (\d+)/)
-    if (!versionMatch) return true // Old hook without version
-
-    const currentVersion = parseInt(versionMatch[1])
-    return currentVersion < parseInt(HOOK_VERSION)
-  }
-
-  // Backup existing hooks if they exist and aren't ours (or need updating)
-  if (fs.existsSync(preCommitPath)) {
-    const content = fs.readFileSync(preCommitPath, 'utf8')
-    if (!content.includes('HumanLayer thoughts') || hookNeedsUpdate(preCommitPath)) {
-      // Only backup non-HumanLayer hooks to prevent recursion
-      if (!content.includes('HumanLayer thoughts')) {
-        fs.renameSync(preCommitPath, `${preCommitPath}.old`)
-      } else {
-        // For outdated HumanLayer hooks, just remove them
-        fs.unlinkSync(preCommitPath)
-      }
-    }
-  }
-
-  if (fs.existsSync(postCommitPath)) {
-    const content = fs.readFileSync(postCommitPath, 'utf8')
-    if (!content.includes('HumanLayer thoughts') || hookNeedsUpdate(postCommitPath)) {
-      // Only backup non-HumanLayer hooks to prevent recursion
-      if (!content.includes('HumanLayer thoughts')) {
-        fs.renameSync(postCommitPath, `${postCommitPath}.old`)
-      } else {
-        // For outdated HumanLayer hooks, just remove them
-        fs.unlinkSync(postCommitPath)
-      }
-    }
-  }
-
-  // Write new hooks only if needed
-  if (!fs.existsSync(preCommitPath) || hookNeedsUpdate(preCommitPath)) {
-    fs.writeFileSync(preCommitPath, preCommitContent)
-    fs.chmodSync(preCommitPath, '755')
+  // Install pre-commit hook using cross-platform Node.js implementation
+  const preCommitContent = generatePreCommitHook(HOOK_VERSION)
+  if (installGitHook(hooksDir, 'pre-commit', preCommitContent).updated) {
     updated.push('pre-commit')
   }
 
-  if (!fs.existsSync(postCommitPath) || hookNeedsUpdate(postCommitPath)) {
-    fs.writeFileSync(postCommitPath, postCommitContent)
-    fs.chmodSync(postCommitPath, '755')
+  // Install post-commit hook using cross-platform Node.js implementation
+  const postCommitContent = generatePostCommitHook(HOOK_VERSION)
+  if (installGitHook(hooksDir, 'post-commit', postCommitContent).updated) {
     updated.push('post-commit')
   }
 
@@ -698,9 +618,9 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
         if (fs.existsSync(dir)) {
           try {
             // Reset permissions so we can delete it
-            execSync(`chmod -R 755 "${dir}"`, { stdio: 'pipe' })
+            removeReadOnly(dir)
           } catch {
-            // Ignore chmod errors
+            // Ignore errors
           }
         }
       }
@@ -708,19 +628,62 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
     }
     fs.mkdirSync(thoughtsDir)
 
-    // Create symlinks - flipped structure for easier access
+    // Create directory links - flipped structure for easier access
+    // Uses symlinks on Unix, junctions on Windows (no admin required)
     const repoTarget = getRepoThoughtsPath(profileConfig, mappedName)
     const globalTarget = getGlobalThoughtsPath(profileConfig)
 
-    // Direct symlinks to user and shared directories for repo-specific thoughts
-    fs.symlinkSync(path.join(repoTarget, config.user), path.join(thoughtsDir, config.user), 'dir')
-    fs.symlinkSync(path.join(repoTarget, 'shared'), path.join(thoughtsDir, 'shared'), 'dir')
+    // Check for cross-drive scenario on Windows during init
+    if (isWindows()) {
+      const thoughtsDrive = path.parse(expandedRepo).root
+      const codeDrive = path.parse(currentRepo).root
+      if (thoughtsDrive !== codeDrive) {
+        console.warn('')
+        console.warn(chalk.yellow('⚠️  Warning: Thoughts repository and code are on different drives'))
+        console.warn(chalk.yellow(`   Thoughts: ${thoughtsDrive}`))
+        console.warn(chalk.yellow(`   Code: ${codeDrive}`))
+        console.warn(chalk.yellow('   This may cause issues with hard links during sync.'))
+        console.warn(
+          chalk.yellow('   Consider moving thoughts repository to the same drive as your code.'),
+        )
+        console.warn('')
+      }
+    }
 
-    // Global directory as before
-    fs.symlinkSync(globalTarget, path.join(thoughtsDir, 'global'), 'dir')
+    // Direct links to user and shared directories for repo-specific thoughts
+    const userLink = await createDirectoryLink(
+      path.join(repoTarget, config.user),
+      path.join(thoughtsDir, config.user),
+    )
+    const sharedLink = await createDirectoryLink(
+      path.join(repoTarget, 'shared'),
+      path.join(thoughtsDir, 'shared'),
+    )
+
+    // Global directory link
+    const globalLink = await createDirectoryLink(globalTarget, path.join(thoughtsDir, 'global'))
+
+    // Check if all links succeeded
+    if (!userLink.success || !sharedLink.success || !globalLink.success) {
+      console.error(chalk.red('Error: Failed to create directory links'))
+      if (!userLink.success) console.error(chalk.red(`  User: ${userLink.message}`))
+      if (!sharedLink.success) console.error(chalk.red(`  Shared: ${sharedLink.message}`))
+      if (!globalLink.success) console.error(chalk.red(`  Global: ${globalLink.message}`))
+      process.exit(1)
+    }
+
+    // Inform users about link type used
+    if (isWindows()) {
+      showLinkInfo()
+    }
 
     // Check for other users and create symlinks
-    const otherUsers = updateSymlinksForNewUsers(currentRepo, profileConfig, mappedName, config.user)
+    const otherUsers = await updateSymlinksForNewUsers(
+      currentRepo,
+      profileConfig,
+      mappedName,
+      config.user,
+    )
 
     if (otherUsers.length > 0) {
       console.log(chalk.green(`✓ Added symlinks for other users: ${otherUsers.join(', ')}`))
@@ -785,11 +748,7 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
         })
 
         // Automatically update .gitignore
-        const gitignoreEntries = [
-          '.claude/agents',
-          '.claude/commands',
-          'hack/spec_metadata.sh',
-        ]
+        const gitignoreEntries = ['.claude/agents', '.claude/commands', 'hack/spec_metadata.sh']
 
         const gitignoreResult = updateGitIgnore(currentRepo, gitignoreEntries)
 
@@ -798,11 +757,7 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
         }
 
         if (gitignoreResult.skipped.length > 0) {
-          console.log(
-            chalk.yellow(
-              `⚠️  Already in .gitignore: ${gitignoreResult.skipped.join(', ')}`,
-            ),
-          )
+          console.log(chalk.yellow(`⚠️  Already in .gitignore: ${gitignoreResult.skipped.join(', ')}`))
         }
 
         console.log(chalk.green('✓ Claude Code setup linked'))
@@ -848,7 +803,6 @@ export async function thoughtsInitCommand(options: InitOptions): Promise<void> {
     )
     console.log(`  3. Your thoughts will sync automatically when you commit code`)
     console.log(`  4. Run ${chalk.cyan('humanlayer thoughts status')} to check sync status`)
-
   } catch (error) {
     console.error(chalk.red(`Error during thoughts init: ${error}`))
     process.exit(1)

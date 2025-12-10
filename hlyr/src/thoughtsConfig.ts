@@ -4,6 +4,7 @@ import os from 'os'
 import { execSync } from 'child_process'
 import { ConfigResolver, saveConfigFile } from './config.js'
 import type { RepoMappingObject, ProfileConfig } from './config.js'
+import { createDirectoryLink } from './utils/symlink.js'
 
 export interface ThoughtsConfig {
   thoughtsRepo: string
@@ -358,13 +359,27 @@ export function updateSymlinksForNewUsers(
   repoName: string,
   currentUser: string,
 ): string[]
+// Overloaded signatures for updateSymlinksForNewUsers
 export function updateSymlinksForNewUsers(
+  currentRepoPath: string,
+  config: ResolvedProfileConfig,
+  repoName: string,
+  currentUser: string,
+): Promise<string[]>
+export function updateSymlinksForNewUsers(
+  currentRepoPath: string,
+  thoughtsRepo: string,
+  reposDir: string,
+  repoName: string,
+  currentUser: string,
+): Promise<string[]>
+export async function updateSymlinksForNewUsers(
   currentRepoPath: string,
   configOrThoughtsRepo: ResolvedProfileConfig | string,
   reposDirOrRepoName: string,
   repoNameOrCurrentUser: string,
   currentUser?: string,
-): string[] {
+): Promise<string[]> {
   let resolvedConfig: { thoughtsRepo: string; reposDir: string }
   let effectiveRepoName: string
   let effectiveUser: string
@@ -410,8 +425,10 @@ export function updateSymlinksForNewUsers(
     // Skip if symlink already exists or if it's the current user (already handled)
     if (!fs.existsSync(symlinkPath) && userName !== effectiveUser) {
       try {
-        fs.symlinkSync(targetPath, symlinkPath, 'dir')
-        addedSymlinks.push(userName)
+        const result = await createDirectoryLink(targetPath, symlinkPath)
+        if (result.success) {
+          addedSymlinks.push(userName)
+        }
       } catch {
         // Ignore errors - might be permission issues
       }

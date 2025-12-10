@@ -10,6 +10,7 @@ import {
   resolveProfileForRepo,
   getRepoNameFromMapping,
 } from '../../thoughtsConfig.js'
+import { removeReadOnly } from '../../utils/platform.js'
 
 interface SyncOptions {
   message?: string
@@ -105,9 +106,9 @@ function createSearchDirectory(thoughtsDir: string): void {
   // Remove old .search directory if it exists
   if (fs.existsSync(oldSearchDir)) {
     try {
-      execSync(`chmod -R 755 "${oldSearchDir}"`, { stdio: 'pipe' })
+      removeReadOnly(oldSearchDir)
     } catch {
-      // Ignore chmod errors
+      // Ignore errors
     }
     fs.rmSync(oldSearchDir, { recursive: true, force: true })
   }
@@ -116,9 +117,9 @@ function createSearchDirectory(thoughtsDir: string): void {
   if (fs.existsSync(searchDir)) {
     try {
       // Reset permissions so we can delete it
-      execSync(`chmod -R 755 "${searchDir}"`, { stdio: 'pipe' })
+      removeReadOnly(searchDir)
     } catch {
-      // Ignore chmod errors
+      // Ignore errors
     }
     fs.rmSync(searchDir, { recursive: true, force: true })
   }
@@ -187,8 +188,25 @@ function createSearchDirectory(thoughtsDir: string): void {
       // Create hard link to the real file
       fs.linkSync(realSourcePath, targetPath)
       linkedCount++
-    } catch {
-      // Silently skip files we can't link (e.g., different filesystems)
+    } catch (error) {
+      // Windows-specific error handling for cross-drive scenarios
+      if (process.platform === 'win32' && error.code === 'EXDEV') {
+        const thoughtsRepoDrive = path.parse(thoughtsDir).root
+        const codeDrive = path.parse(process.cwd()).root
+
+        console.warn('')
+        console.warn(chalk.yellow('⚠️  Cannot create hard links across drives on Windows'))
+        console.warn(chalk.yellow(`   Thoughts repo: ${thoughtsRepoDrive}`))
+        console.warn(chalk.yellow(`   Code repo: ${codeDrive}`))
+        console.warn(
+          chalk.yellow('   Please move your thoughts repository to the same drive as your code.'),
+        )
+        console.warn('')
+
+        // Only show this warning once, then skip remaining files
+        break
+      }
+      // Silently skip files we can't link (e.g., different filesystems on Unix)
     }
   }
 
@@ -222,7 +240,12 @@ export async function thoughtsSyncCommand(options: SyncOptions): Promise<void> {
 
     if (mappedName) {
       // Update symlinks for any new users using profile config
-      const newUsers = updateSymlinksForNewUsers(currentRepo, profileConfig, mappedName, config.user)
+      const newUsers = await updateSymlinksForNewUsers(
+        currentRepo,
+        profileConfig,
+        mappedName,
+        config.user,
+      )
 
       if (newUsers.length > 0) {
         console.log(chalk.green(`✓ Added symlinks for new users: ${newUsers.join(', ')}`))

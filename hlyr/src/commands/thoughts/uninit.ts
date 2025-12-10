@@ -9,6 +9,7 @@ import {
   getRepoNameFromMapping,
   getProfileNameFromMapping,
 } from '../../thoughtsConfig.js'
+import { removeReadOnly } from '../../utils/platform.js'
 
 interface UninitOptions {
   force?: boolean
@@ -51,9 +52,9 @@ export async function thoughtsUninitCommand(options: UninitOptions): Promise<voi
       console.log(chalk.gray('Removing searchable directory...'))
       try {
         // Reset permissions in case they're restricted
-        execSync(`chmod -R 755 "${searchableDir}"`, { stdio: 'pipe' })
+        removeReadOnly(searchableDir)
       } catch {
-        // Ignore chmod errors
+        // Ignore errors
       }
       fs.rmSync(searchableDir, { recursive: true, force: true })
     }

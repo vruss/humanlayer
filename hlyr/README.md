@@ -255,6 +255,64 @@ humanlayer thoughts profile list
 
 The thoughts system keeps your notes separate from code while making them easily accessible to AI assistants.
 
+**See [THOUGHTS.md](./THOUGHTS.md) for comprehensive documentation.**
+
+#### Team Collaboration with Remote Repositories
+
+The thoughts system supports team collaboration by storing thoughts in a git repository that can be shared via GitHub/GitLab.
+
+**Initial Setup (First Team Member):**
+
+```bash
+# 1. Initialize thoughts in your project
+cd /path/to/your-project
+humanlayer thoughts init
+
+# 2. Create a private repository on GitHub/GitLab (e.g., "team-thoughts")
+
+# 3. Push your thoughts repository to the remote
+cd ~/thoughts
+git remote add origin git@github.com:your-org/team-thoughts.git
+git push -u origin main
+```
+
+**Setup for Additional Team Members:**
+
+```bash
+# 1. Clone the shared thoughts repository
+git clone git@github.com:your-org/team-thoughts.git ~/thoughts
+
+# 2. Initialize thoughts in your local code repository
+cd /path/to/your-project
+humanlayer thoughts init
+```
+
+**Daily Workflow:**
+
+```bash
+# Pull latest thoughts from team
+cd ~/thoughts && git pull
+
+# Work on code and thoughts (thoughts auto-sync on code commits)
+
+# Push your thoughts updates to share with team
+cd ~/thoughts && git push
+```
+
+**Organizing Team Thoughts:**
+
+- **Personal notes** (`thoughts/yourname/`): Your private TODO lists, debugging notes, investigations
+- **Team-shared notes** (`thoughts/shared/`): Architecture decisions, API docs, meeting notes
+- **Global shared** (`thoughts/global/shared/`): Company-wide coding standards, cross-project patterns
+
+**Best Practices:**
+
+1. Keep your thoughts repository **private** on GitHub/GitLab
+2. Pull before editing shared files to avoid conflicts
+3. Use clear commit messages when syncing shared thoughts
+4. Use Markdown files for easy readability
+5. Communicate with your team when updating important shared documentation
+
 ### `claude`
 
 Manage Claude Code configuration.
@@ -311,6 +369,33 @@ humanlayer claude init --all
 ```
 
 Without `--all`, the command requires an interactive terminal and will exit with an error in non-TTY environments.
+
+## Windows Support
+
+The `thoughts` system works on Windows with the following platform-specific behavior:
+
+### Directory Links
+
+- **Unix/macOS/Linux**: Uses symbolic links
+- **Windows**: Uses directory junctions (works without administrator privileges)
+
+Both approaches provide the same functionality - accessing thoughts as if they're part of your code repository.
+
+### Recommended: WSL for Windows Users
+
+For the best experience on Windows, we recommend using **Windows Subsystem for Linux (WSL)**:
+
+- Full Unix compatibility
+- Native symlink support
+- Seamless integration with Windows filesystem
+
+**Install WSL**: https://aka.ms/wsl
+
+### Requirements for Native Windows
+
+- **Hard Links**: Thoughts repository must be on the same drive as your code (e.g., both on C:)
+- **Git Hooks**: Use Node.js-based hooks that work in cmd, PowerShell, Git Bash, and WSL
+- **No Admin Required**: Directory junctions work without elevated privileges
 
 ## Use Cases
 
